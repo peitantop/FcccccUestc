@@ -1,9 +1,9 @@
 from torch.utils.data import DataLoader
 import torch
 from torchvision import transforms, datasets
-from sklearn.model_selection import train_test_split
 
 data_dir = 'FcccccUestc/Training_data'
+batch_size = 32
 
 # 图像变换
 train_transforms = transforms.Compose([
@@ -30,7 +30,7 @@ data_len = len(dataset)
 train_size = int(0.8 * data_len)
 val_size = data_len - train_size
 train_indices, val_indices = torch.utils.data.random_split(
-    range(data_len), [train_size, val_size]
+    dataset=dataset, lengths=[train_size, val_size]
 )
 
 
@@ -49,8 +49,8 @@ class TransformSubset(torch.utils.data.Dataset):
         return len(self.subset)
 
 
-# 应用不同的 Transform
 train_dataset = TransformSubset(train_indices, transform=train_transforms)
 val_dataset = TransformSubset(val_indices, transform=valid_transforms)
 
-
+train_dataloader = DataLoader(dataset=train_dataset, shuffle=True, batch_size=batch_size)
+valid_dataloader = DataLoader(dataset=dataset, batch_size=batch_size, shuffle=True)
