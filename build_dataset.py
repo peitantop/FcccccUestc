@@ -1,13 +1,32 @@
 from torch.utils.data import DataLoader
 import torch
 from torchvision import transforms, datasets
+import pandas as pd
 
-data_dir = 'FcccccUestc/Training_data'
+data_dir = 'D:/Fc25_07/FcccccUestc/Training_data'
+label_dir = 'D:/Fc25_07/FcccccUestc/total_data.csv'
+
+
+def csv_to_vectors_pandas(csv_file, columns=None):
+    # 有标题行，设置 header=0
+    df = pd.read_csv(csv_file, header=0, encoding='windows-1254')
+    if columns is not None:
+        df = df.iloc[:, columns]
+    vectors = df.values.astype(int).tolist()
+    return vectors
+
+# # 示例：读取所有列
+# vectors = csv_to_vectors_pandas('data.csv')
+# # 示例：读取前两列
+vectors = csv_to_vectors_pandas(label_dir, columns=[7, 14])
+print(vectors)
+
 batch_size = 32
 
 # 图像变换
 train_transforms = transforms.Compose([
     transforms.RandomResizedCrop(224),
+    transforms.ColorJitter(brightness=1.1, contrast=1.5, saturation=0.8),       # 可根据训练结果调节
     transforms.RandomHorizontalFlip(p=0.5),
     transforms.RandomVerticalFlip(p=0.5),
     transforms.RandomRotation(degrees=35),
