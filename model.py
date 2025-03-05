@@ -6,23 +6,80 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision import models
 import torch.nn as nn
 from torchvision.utils import _log_api_usage_once
-
+import segmentation_models_pytorch as smp
+from model_module import EAGFM, HFF_MSFA
 
 # base_model = models.resnet152(weights=models.ResNet152_Weights.IMAGENET1K_V1)
+# base_model = models.vgg19_bn(weights=models.VGG19_BN_Weights.IMAGENET1K_V1)
+# base_model = smp.Unet(
+#     encoder_name="resnet50",
+#     encoder_depth=5,
+#     encoder_weights=None,
+#     decoder_attention_type="scse"
+# )
+
+
+unet = smp.Unet(
+    encoder_name="resnet50",
+    encoder_depth=5,
+    encoder_weights=None,
+    decoder_attention_type="scse",
+    activation="sigmoid"
+)
+densenet = models.densenet201()
+resnet = models.resnet152()
+
+
+# base_model = models.GoogLeNet()
 # print(base_model)
 
-# input = torch.rand([1, 3, 224, 224])
-# output = base_model(input)
-# print(input.size())
+# inputs = torch.rand([1, 3, 224, 224])
+# output = base_model(inputs)
+# print(inputs.size())
 # print(output.size())
 
-class EyeModel(nn.Module):
+class TanNet(nn.Module):
     def __init__(self):
-        super(EyeModel, self).__init__()
+        super(TanNet, self).__init__()
+        self.resnet_features = nn.Sequential(
+            resnet.conv1,
+            resnet.bn1,
+            resnet.relu,
+            resnet.maxpool,
+            resnet.layer1,
+            resnet.layer2,
+            resnet.layer3,
+            resnet.layer4
+        )
+
+        self.unet = unet
+
+        self.densenet_features = nn.Sequential(
+            densenet.features,
+            nn.Conv2d(1920, 2048, kernel_size=1, stride=1)
+        )
+
+        self.layers = nn.Sequential(
+            nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3),  # [1, 64, 112, 112]
+            nn.MaxPool2d(kernel_size=3, stride=2, padding=1),  # [1, 64, 56, 56]
+            nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),  # [1, 128, 28, 28]
+            nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1),  # [1, 256, 14, 14]
+            nn.Conv2d(256, 512, kernel_size=3, stride=2, padding=1),  # [1, 512, 7, 7]
+            nn.Conv2d(512, 2048, kernel_size=1, stride=1)  # [1, 2048, 7, 7]
+        )
 
 
     def forward(self, x):
-        pass
+        x1 = self.resnet_features(x)
+        x2 = self.unet(x)
+        x3 = self.densenet_features(x)
+        x2 = self.layers(x2)
+        EGAFM_module = EAGFM.EAGFM(2048)      # 初始化EAGFM模块并设定通道维度
+        x4 = EGAFM_module(x1, x3)
+        msfa = HFF_MSFA.MSFA(2048)
+        x5 = msfa(x2, x4)
+        return x5
+
 
 def conv3x3(in_planes: int, out_planes: int, stride: int = 1, groups: int = 1, dilation: int = 1) -> nn.Conv2d:
     """3x3 convolution with padding"""
@@ -37,9 +94,11 @@ def conv3x3(in_planes: int, out_planes: int, stride: int = 1, groups: int = 1, d
         dilation=dilation,
     )
 
+
 def conv1x1(in_planes: int, out_planes: int, stride: int = 1) -> nn.Conv2d:
     """1x1 convolution"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=1, stride=stride, bias=False)
+
 
 class BasicBlock(nn.Module):
     expansion: int = 1
@@ -89,20 +148,20 @@ class BasicBlock(nn.Module):
 
         return out
 
-class Bottleneck(nn.Module):
 
+class Bottleneck(nn.Module):
     expansion: int = 4
 
     def __init__(
-        self,
-        inplanes: int,
-        planes: int,
-        stride: int = 1,
-        downsample: Optional[nn.Module] = None,
-        groups: int = 1,
-        base_width: int = 64,
-        dilation: int = 1,
-        norm_layer: Optional[Callable[..., nn.Module]] = None,
+            self,
+            inplanes: int,
+            planes: int,
+            stride: int = 1,
+            downsample: Optional[nn.Module] = None,
+            groups: int = 1,
+            base_width: int = 64,
+            dilation: int = 1,
+            norm_layer: Optional[Callable[..., nn.Module]] = None,
     ) -> None:
         super().__init__()
         if norm_layer is None:
@@ -144,15 +203,15 @@ class Bottleneck(nn.Module):
 
 class ResNet(nn.Module):
     def __init__(
-        self,
-        block: Type[Union[BasicBlock, Bottleneck]],
-        layers: List[int],
-        num_classes: int = 1000,
-        zero_init_residual: bool = False,
-        groups: int = 1,
-        width_per_group: int = 64,
-        replace_stride_with_dilation: Optional[List[bool]] = None,
-        norm_layer: Optional[Callable[..., nn.Module]] = None,
+            self,
+            block: Type[Union[BasicBlock, Bottleneck]],
+            layers: List[int],
+            num_classes: int = 1000,
+            zero_init_residual: bool = False,
+            groups: int = 1,
+            width_per_group: int = 64,
+            replace_stride_with_dilation: Optional[List[bool]] = None,
+            norm_layer: Optional[Callable[..., nn.Module]] = None,
     ) -> None:
         super().__init__()
         _log_api_usage_once(self)
@@ -201,12 +260,12 @@ class ResNet(nn.Module):
                     nn.init.constant_(m.bn2.weight, 0)  # type: ignore[arg-type]
 
     def _make_layer(
-        self,
-        block: Type[Union[BasicBlock, Bottleneck]],
-        planes: int,
-        blocks: int,
-        stride: int = 1,
-        dilate: bool = False,
+            self,
+            block: Type[Union[BasicBlock, Bottleneck]],
+            planes: int,
+            blocks: int,
+            stride: int = 1,
+            dilate: bool = False,
     ) -> nn.Sequential:
         norm_layer = self._norm_layer
         downsample = None
@@ -261,3 +320,10 @@ class ResNet(nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         return self._forward_impl(x)
+
+
+if __name__ == "__main__":
+    model = TanNet()
+    inputtensor = torch.rand(1, 3, 224, 224)
+    output = model(inputtensor)
+    print(output.size())
