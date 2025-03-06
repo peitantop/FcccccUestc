@@ -5,9 +5,10 @@ from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 from torchvision import models
 import torch.nn as nn
+import torch.nn.functional as F
 from torchvision.utils import _log_api_usage_once
 import segmentation_models_pytorch as smp
-from model_module import EAGFM, HFF_MSFA,FCA, HRAMi_DRAMiT, DTAB_GCSA, FSAS_DFFN, IGAB
+from model_module import EAGFM, HFF_MSFA,FCA, HRAMi_DRAMiT, DTAB_GCSA, FSAS_DFFN, IGAB, CCFF, MSCA, CVIM, CPAM, FFM, MSPA, SCSA, MASAG
 
 
 
@@ -20,12 +21,87 @@ unet = smp.Unet(
 )
 densenet = models.densenet201()
 resnet = models.resnet152()
-ImageStrength_block1 = FCA.FCAttention(3)
+ImageStrength_block1 = FCA.FCAttention(channel=3)
 ImageStrength_block2 = HRAMi_DRAMiT.DRAMiT(dim=64, num_head=64)
-ImageStrength_block3 =  DTAB_GCSA.DTAB(64)
-ImageStrength_block4 = DTAB_GCSA.GCSA(64)
-ImageStrength_block5 = FSAS_DFFN.FSASDFFN(64)
-ImageStrength_block6 = IGAB.IGAB(64,dim_head=64)
+ImageStrength_block3 =  DTAB_GCSA.DTAB(dim=64)
+ImageStrength_block4 = DTAB_GCSA.GCSA(dim=64)
+ImageStrength_block5 = FSAS_DFFN.FSASDFFN(dim=64)
+ImageStrength_block6 = IGAB.IGAB(dim=64,dim_head=64)
+
+
+
+class Encoder(nn.Module):
+    def __init__(self):
+        super().__init__()
+        # 上采样部分 (7x7 -> 64x64)
+        self.tconv1 = nn.ConvTranspose2d(
+            2048, 1024, kernel_size=3, 
+            stride=2, padding=1, output_padding=1
+        )
+        self.tconv2 = nn.ConvTranspose2d(
+            1024, 1024, kernel_size=3,
+            stride=2, padding=1, output_padding=1
+        )
+        self.tconv3 = nn.ConvTranspose2d(
+            1024, 1024, kernel_size=3,
+            stride=2, padding=1, output_padding=1
+        )
+        # 插值上采样调整最终尺寸
+        self.upsample = nn.Upsample(
+            size=(64, 64), mode='bilinear', align_corners=False
+        )
+        # 最后的卷积细化特征
+        self.final_conv = nn.Conv2d(
+            1024, 1024, kernel_size=3, padding=1
+        )
+
+    def forward(self, x):
+        x = F.relu(self.tconv1(x))  # [1,1024,14,14]
+        x = F.relu(self.tconv2(x))  # [1,1024,28,28]
+        x = F.relu(self.tconv3(x))  # [1,1024,56,56]
+        x = self.upsample(x)        # [1,1024,64,64]
+        x = self.final_conv(x)      # 保持尺寸
+        return x
+
+class Decoder(nn.Module):
+    def __init__(self):
+        super().__init__()
+        # 下采样部分 (64x64 -> 7x7)
+        self.conv1 = nn.Conv2d(
+            1024, 1024, kernel_size=3, 
+            stride=2, padding=1
+        )
+        self.conv2 = nn.Conv2d(
+            1024, 2048, kernel_size=3,
+            stride=2, padding=1
+        )
+        self.conv3 = nn.Conv2d(
+            2048, 2048, kernel_size=3,
+            stride=2, padding=1
+        )
+        # 自适应池化对齐尺寸
+        self.adaptive_pool = nn.AdaptiveAvgPool2d((7,7))
+
+    def forward(self, x):
+        x = F.relu(self.conv1(x))  # [1,1024,32,32]
+        x = F.relu(self.conv2(x))  # [1,2048,16,16]
+        x = F.relu(self.conv3(x))  # [1,2048,8,8]
+        x = self.adaptive_pool(x)  # [1,2048,7,7]
+        return x
+
+class Autoencoder(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.encoder = Encoder()
+        self.decoder = Decoder()
+
+    def forward(self, x):
+        encoded = self.encoder(x)
+        decoded = self.decoder(encoded)
+        return decoded
+
+RHmodel = Autoencoder()
+
 class TanNet(nn.Module):
     def __init__(self):
         super(TanNet, self).__init__()
@@ -35,7 +111,6 @@ class TanNet(nn.Module):
         self.ImageStrength_block4 = ImageStrength_block4
         self.ImageStrength_block5 = ImageStrength_block5
         self.ImageStrength_block6 = ImageStrength_block6
-
         self.sigmoid = nn.Sigmoid()
         self.resnet_features = nn.Sequential(
             resnet.conv1,
@@ -47,9 +122,7 @@ class TanNet(nn.Module):
             resnet.layer3,
             resnet.layer4
         )
-
         self.unet = unet
-
         self.densenet_features = nn.Sequential(
             densenet.features,
             nn.Conv2d(1920, 2048, kernel_size=1, stride=1)
@@ -66,7 +139,20 @@ class TanNet(nn.Module):
         )
         self.EGAFM = EAGFM.EAGFM(2048)  
         self.msfa = HFF_MSFA.MSFA(2048)
-
+        self.RHmodel = RHmodel
+        self.CCFF = CCFF.CCFF(in_channels=1024, out_channels=1024)
+        self.msca = MSCA.MSCAttention(dim=1024)
+        self.CVIM = CVIM.CVIM(c=1024)
+        self.CPAM = CPAM.CPAM(1024)
+        self.FFM = FFM.FFM(1024)
+        self.MSPA = MSPA.MSPAModule(inplanes=256,scale=4)
+        self.SCSA = SCSA.SCSA(dim=1024, head_num=8)
+        self.MASAG = MASAG.MASAG(1024)
+        self.AVGpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc1 = nn.Linear(2048, 2048)
+        self.fc2 = nn.Linear(2048, 2048)
+        self.fc3 = nn.Linear(2048, 2048)
+        self.fc4 = nn.Linear(2048, 8)
 
     def forward(self, x):
         x1 = self.ImageStrength_block1(x)
@@ -85,7 +171,24 @@ class TanNet(nn.Module):
         x11 = self.layers(x9)    
         x12 = self.EGAFM(x8, x10)
         x13 = self.msfa(x11, x12)
-        return x13
+        x13 = self.RHmodel.encoder(x13)
+        x14 = self.CCFF(x13)
+        x17 = self.msca(x13)
+        x15 = self.CVIM(x14, x17)
+        x16 = self.CPAM([x14, x17])
+        x18 = self.FFM(x15, x16)
+        x19 = self.MSPA(x18)
+        x20 = self.SCSA(x18)
+        x21 = self.MASAG(x19, x20)
+        x21 = self.RHmodel.decoder(x21)
+        # x21 = self.AVGpool(x21)
+        x21 = self.fc1(x21)
+        x21 = self.fc2(x21)
+        x21 = self.fc3(x21)
+
+        x21 = self.fc4(x21)
+
+        return x21
 
 
 
