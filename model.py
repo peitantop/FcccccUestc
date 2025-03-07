@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchvision.utils import _log_api_usage_once
 import segmentation_models_pytorch as smp
-from model_module import EAGFM, HFF_MSFA,FCA, HRAMi_DRAMiT, DTAB_GCSA, FSAS_DFFN, IGAB, CCFF, MSCA, CVIM, CPAM, FFM, MSPA, SCSA, MASAG
+from model_module import EAGFM, HFF_MSFA,FCA, HRAMi_DRAMiT, DTAB_GCSA, FSAS_DFFN, IGAB, CCFF, MSCA, CVIM, CPAM, FFM, MSPA, SCSA, MASAG, PSConv
 
 
 
@@ -148,11 +148,12 @@ class TanNet(nn.Module):
         self.MSPA = MSPA.MSPAModule(inplanes=256,scale=4)
         self.SCSA = SCSA.SCSA(dim=1024, head_num=8)
         self.MASAG = MASAG.MASAG(1024)
-        self.AVGpool = nn.AdaptiveAvgPool2d((1, 1))
-        self.fc1 = nn.Linear(2048, 2048)
-        self.fc2 = nn.Linear(2048, 2048)
-        self.fc3 = nn.Linear(2048, 2048)
-        self.fc4 = nn.Linear(2048, 8)
+        self.PSConv = PSConv.PSConv(1024, 1024)
+        # self.AVGpool = nn.AdaptiveAvgPool2d((1, 1))
+        # self.fc1 = nn.Linear(2048, 2048)
+        # self.fc2 = nn.Linear(2048, 2048)
+        # self.fc3 = nn.Linear(2048, 2048)
+        # self.fc4 = nn.Linear(2048, 8)
 
     def forward(self, x):
         x1 = self.ImageStrength_block1(x)
@@ -172,6 +173,7 @@ class TanNet(nn.Module):
         x12 = self.EGAFM(x8, x10)
         x13 = self.msfa(x11, x12)
         x13 = self.RHmodel.encoder(x13)
+        x13 = self.PSConv(x13)
         x14 = self.CCFF(x13)
         x17 = self.msca(x13)
         x15 = self.CVIM(x14, x17)
@@ -182,15 +184,19 @@ class TanNet(nn.Module):
         x21 = self.MASAG(x19, x20)
         x21 = self.RHmodel.decoder(x21)
         # x21 = self.AVGpool(x21)
-        x21 = self.fc1(x21)
-        x21 = self.fc2(x21)
-        x21 = self.fc3(x21)
+        # x21 = self.fc1(x21)
+        # x21 = self.fc2(x21)
+        # x21 = self.fc3(x21)
 
-        x21 = self.fc4(x21)
+        # x21 = self.fc4(x21)
 
         return x21
 
 
+
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters())
+ 
 
 if __name__ == "__main__":
     model = TanNet()
@@ -198,3 +204,9 @@ if __name__ == "__main__":
     output = model(inputtensor)
     print(output)
     print(output.size())
+    # print(model.parameters)
+    total_params = count_parameters(model)
+    print(f"Total Parameters: {total_params:,}")
+
+
+
