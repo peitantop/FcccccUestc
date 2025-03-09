@@ -5,10 +5,10 @@ import pandas as pd
 import os
 from torchvision.datasets.folder import default_loader
 import matplotlib.pyplot as plt
-import numpy as np 
+import numpy as np
 import sys
 import torch.nn as nn
-from model import TanNet
+from model_light import TanNet
 from torch.utils.data import DataLoader, WeightedRandomSampler
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import ReduceLROnPlateau
@@ -29,19 +29,19 @@ from collections import Counter
 sys.stdin.reconfigure(encoding='utf-8')
 sys.stdout.reconfigure(encoding='utf-8')
 
-
-data_dir = 'D:/Fc25_07/FcccccUestc/Training_data'
-label_dir = 'D:/Fc25_07/FcccccUestc/total_data.csv'
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+data_dir = '/root/autodl-tmp/Fc25_07/FcccccUestc/Training_data'
+label_dir = '/root/autodl-tmp/Fc25_07/FcccccUestc/total_data.csv'
 # Excel 文件路径
 generator = torch.Generator().manual_seed(42)
 
 # 将 DataFrame 保存为 CSV 文件
 df = pd.read_csv(label_dir, header=0, encoding='utf-8')
 
-batch_size = 32
+batch_size = 16
 
 train_transforms = transforms.Compose([
-    # transforms.Resize(256),
+    # transforms.Resize(256), # Resize and CenterCrop may need to be added back based on model input size
     # transforms.CenterCrop(224),
     # transforms.ColorJitter(brightness=1.1, contrast=1.5, saturation=0.8),       # 可根据训练结果调节
     transforms.RandomHorizontalFlip(p=0.5),
@@ -52,14 +52,14 @@ train_transforms = transforms.Compose([
 ])
 
 valid_transforms = transforms.Compose([
-    # transforms.Resize(256),
+    # transforms.Resize(256), # Resize and CenterCrop may need to be added back based on model input size
     # transforms.CenterCrop(224),
     transforms.ToTensor(),
     transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
 ])
 
 
-dataset = CustomDataset(data_dir=data_dir, label_dir=label_dir, transform=None)
+dataset = CustomDataset(data_dir=data_dir, label_dir=label_dir, transform=None) # No transform here, applied in subsets
 data_len = len(dataset)
 
 
@@ -72,19 +72,16 @@ train_indices, val_indices = torch.utils.data.random_split(
 train_dataset = TransformSubset(train_indices, transform=train_transforms)
 val_dataset = TransformSubset(val_indices, transform=valid_transforms)
 
-train_dataloader = DataLoader(dataset=train_dataset, shuffle=True, batch_size=batch_size)
-valid_dataloader = DataLoader(dataset=val_dataset, batch_size=batch_size, shuffle=True)
+train_dataloader = DataLoader(dataset=train_dataset, shuffle=True, batch_size=batch_size, num_workers=0) # num_workers=0 for windows, adjust if needed
+valid_dataloader = DataLoader(dataset=val_dataset, batch_size=batch_size, shuffle=False, num_workers=0) # shuffle=False for validation, num_workers=0 for windows
 
-device = (
-    "cuda"
-    if torch.cuda.is_available()
-    else "mps"
-    if torch.backends.mps.is_available()
-    else "cpu"
-)
 
-criterion = nn.CrossEntropyLoss()
-model = TanNet(8)
+device = "cuda:0"
+
+num_classes = 8 # Define num_classes here to be used consistently
+criterion = nn.BCEWithLogitsLoss()
+model = TanNet(num_classes) # Use num_classes here
+
 
 # 损失函数和采样器
 def get_loss_function(pos_weights=None):
@@ -96,23 +93,23 @@ def get_samplers(dataset):
     # 获取所有标签并堆叠为二维张量 (num_samples, num_classes)
     labels = [sample[1] for sample in dataset]
     all_labels = torch.stack(labels)  # 假设每个标签是形状(num_classes,)的张量
-    
+
     # 统计每个类别的正样本数
     class_counts = all_labels.sum(dim=0).cpu().numpy()  # 形状(num_classes,)
-    
+
     # 添加平滑处理防止除零
     class_counts = np.where(class_counts == 0, 1, class_counts)
-    
+
     # 计算类别权重（注意：这里需要反转权重逻辑）
     class_weights = {cls_idx: 1.0 / count for cls_idx, count in enumerate(class_counts)}
-    
+
     # 生成样本权重（每个样本的权重是其所有正类权重的平均）
     sample_weights = []
     for label in labels:
         # 转换为numpy数组处理
         label_np = label.cpu().numpy()
         positive_classes = np.where(label_np == 1)[0]
-        
+
         if len(positive_classes) == 0:
             # 处理没有正类的情况
             sample_weights.append(1.0)
@@ -120,12 +117,12 @@ def get_samplers(dataset):
             # 计算平均权重
             weight = np.mean([class_weights[cls] for cls in positive_classes])
             sample_weights.append(weight)
-    
+
     # 创建采样器
     return WeightedRandomSampler(
         weights=sample_weights,
-        num_samples=2*len(dataset),
-        replacement=True
+        num_samples=len(dataset), # Corrected: num_samples should be length of dataset for one epoch to cover all data
+        replacement=True # Keep replacement as True for oversampling
     )
 
 # 训练验证框架
@@ -136,16 +133,16 @@ class Trainer:
         self.val_loader = val_loader
         self.device = device
         self.num_classes = num_classes
-        
-        # 获取类别权重
-        all_labels = torch.cat([y for _, y in train_loader.dataset])
+
+        # 获取类别权重，仅在训练集上计算
+        all_labels = torch.cat([sample[1] for sample in train_loader.dataset]) # Use train_loader.dataset
         pos_counts = all_labels.sum(dim=0)
-        pos_weights = (len(all_labels) - pos_counts) / pos_counts
-        
+        pos_weights = (len(all_labels) - pos_counts) / (pos_counts + 1e-5) # Added small epsilon to prevent division by zero
+
         self.criterion = get_loss_function(pos_weights)
         self.optimizer = AdamW(model.parameters(), lr=1e-4, weight_decay=1e-5)
         self.scheduler = ReduceLROnPlateau(self.optimizer, 'max', patience=3)
-        
+
         # 训练记录
         self.history = {
             'train_loss': [], 'val_loss': [],
@@ -158,18 +155,18 @@ class Trainer:
         self.writer = SummaryWriter(
             f"runs/{model.__class__.__name__}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         )
-        
+
         # 记录模型计算图
-        dummy_input = torch.randn(1, 3, 224, 224).to(device)
+        dummy_input = torch.randn(1, 3, 224, 224).to(device) # Assuming input size is 224x224, adjust if different
         self.writer.add_graph(model, dummy_input)
 
     def _compute_metrics(self, y_true, y_pred, threshold=0.6):
         y_pred_bin = (y_pred > threshold).astype(int)
-        
+
         acc = accuracy_score(y_true, y_pred_bin)
         precision = precision_score(y_true, y_pred_bin, average='samples', zero_division=0)
         recall = recall_score(y_true, y_pred_bin, average='samples', zero_division=0)
-        
+
         return acc, precision, recall
 
     def _train_epoch(self):
@@ -177,34 +174,34 @@ class Trainer:
         epoch_loss = 0
         all_preds = []
         all_targets = []
-        
+
         for inputs, targets in tqdm(self.train_loader, desc="Training"):
             inputs = inputs.to(self.device)
             targets = targets.float().to(self.device)
-            
+
             self.optimizer.zero_grad()
-            
+
             outputs = self.model(inputs)
             loss = self.criterion(outputs, targets)
-            
+
             loss.backward()
             self.optimizer.step()
-            
+
             epoch_loss += loss.item()
-            all_preds.append(torch.sigmoid(outputs).cpu().detach().numpy())
+            all_preds.append(torch.sigmoid(outputs).cpu().detach().numpy()) # Apply sigmoid here for predictions
             all_targets.append(targets.cpu().numpy())
-        
+
         # 计算指标
         all_preds = np.concatenate(all_preds)
         all_targets = np.concatenate(all_targets)
         acc, precision, recall = self._compute_metrics(all_targets, all_preds)
-        
-        # 记录训练指标
-        self.writer.add_scalar('Loss/train', epoch_loss, 50)
-        self.writer.add_scalar('Accuracy/train', acc, 50)
-        self.writer.add_scalar('Precision/train', precision, 50)
-        self.writer.add_scalar('Recall/train', recall, 50)
-        
+
+        # 记录训练指标, logging every epoch end, not every 50 iterations.
+        # self.writer.add_scalar('Loss/train', epoch_loss, 50) # Incorrect step, should be epoch number
+        # self.writer.add_scalar('Accuracy/train', acc, 50)
+        # self.writer.add_scalar('Precision/train', precision, 50)
+        # self.writer.add_scalar('Recall/train', recall, 50)
+
         return epoch_loss/len(self.train_loader), acc, precision, recall
 
     def _validate_epoch(self):
@@ -212,25 +209,25 @@ class Trainer:
         epoch_loss = 0
         all_preds = []
         all_targets = []
-        
+
         with torch.no_grad():
             for inputs, targets in tqdm(self.val_loader, desc="Validating"):
                 inputs = inputs.to(self.device)
                 targets = targets.float().to(self.device)
-                
+
                 outputs = self.model(inputs)
                 loss = self.criterion(outputs, targets)
-                
+
                 epoch_loss += loss.item()
                 # 使用sigmoid转换概率
                 probs = torch.sigmoid(outputs)
                 all_preds.append(probs.cpu().numpy())
                 all_targets.append(targets.cpu().numpy())
-        
+
         # 合并所有批次结果
         all_preds = np.concatenate(all_preds)
         all_targets = np.concatenate(all_targets)
-        
+
         # 应用阈值0.6
         y_pred = (all_preds > 0.6).astype(int)
         y_true = all_targets
@@ -240,18 +237,18 @@ class Trainer:
         val_acc = accuracy_score(y_true, y_pred)
         val_precision = precision_score(y_true, y_pred, average='samples', zero_division=0)
         val_recall = recall_score(y_true, y_pred, average='samples', zero_division=0)
-        
+
         # 计算每个类别的指标
         class_metrics = []
         for class_idx in range(self.num_classes):
             class_precision = precision_score(
-                y_true[:, class_idx], 
-                y_pred[:, class_idx], 
+                y_true[:, class_idx],
+                y_pred[:, class_idx],
                 zero_division=0
             )
             class_recall = recall_score(
-                y_true[:, class_idx], 
-                y_pred[:, class_idx], 
+                y_true[:, class_idx],
+                y_pred[:, class_idx],
                 zero_division=0
             )
             class_metrics.append((class_precision, class_recall))
@@ -263,7 +260,8 @@ class Trainer:
             'recall': val_recall,
             'class_metrics': class_metrics,
             'y_true': y_true,
-            'y_pred': y_pred
+            'y_pred': y_pred,
+            'y_pred_probs': all_preds # Added to return probabilities for PR curves and logging
         }
 
     def print_detailed_metrics(self, val_results):
@@ -273,7 +271,7 @@ class Trainer:
         print(f"Accuracy: {val_results['accuracy']:.4f}")
         print(f"Precision (samples): {val_results['precision']:.4f}")
         print(f"Recall (samples): {val_results['recall']:.4f}")
-        
+
         # 打印每个类别的指标
         print("\nPer-Class Metrics:")
         for idx, (prec, rec) in enumerate(val_results['class_metrics']):
@@ -283,17 +281,17 @@ class Trainer:
         """可视化混淆矩阵（最多显示前6个类别）"""
         y_true = val_results['y_true']
         y_pred = val_results['y_pred']
-        
+
         # 生成多标签混淆矩阵
         cm = multilabel_confusion_matrix(y_true, y_pred)
-        
+
         # 设置类别名称
         if class_names is None:
             class_names = [f"Class {i}" for i in range(self.num_classes)]
-        
+
         # 限制显示类别数量
         display_classes = min(max_classes, self.num_classes)
-        
+
         plt.figure(figsize=(15, 10))
         for i in range(display_classes):
             plt.subplot(2, 3, i+1)
@@ -304,26 +302,49 @@ class Trainer:
                       f'  Recall: {val_results["class_metrics"][i][1]:.2f}')
             plt.xlabel('Predicted')
             plt.ylabel('Actual')
-        
+
         plt.tight_layout()
         plt.savefig('confusion_matrix.png')
         plt.show()
 
+    def plot_metrics(self): # Added plot_metrics to visualize training history
+        epochs = len(self.history['train_loss'])
+        plt.figure(figsize=(12, 5))
+        plt.subplot(1, 2, 1)
+        plt.plot(range(1, epochs + 1), self.history['train_loss'], label='Train Loss')
+        plt.plot(range(1, epochs + 1), self.history['val_loss'], label='Validation Loss')
+        plt.xlabel('Epochs')
+        plt.ylabel('Loss')
+        plt.legend()
+        plt.title('Loss vs Epochs')
+
+        plt.subplot(1, 2, 2)
+        plt.plot(range(1, epochs + 1), self.history['train_acc'], label='Train Accuracy')
+        plt.plot(range(1, epochs + 1), self.history['val_acc'], label='Validation Accuracy')
+        plt.xlabel('Epochs')
+        plt.ylabel('Accuracy')
+        plt.legend()
+        plt.title('Accuracy vs Epochs')
+        plt.tight_layout()
+        plt.savefig('training_metrics.png')
+        plt.show()
+
+
     def train(self, epochs):
         best_score = 0
-        
+
         for epoch in range(epochs):
             print(f"\nEpoch {epoch+1}/{epochs}")
-            
+
             # 训练阶段
             train_loss, train_acc, train_prec, train_rec = self._train_epoch()
-            
+
             # 验证阶段（返回完整结果）
             val_results = self._validate_epoch()
-            
+
             # 更新学习率
             self.scheduler.step(val_results['recall'])
-            
+
             # 记录历史数据
             self.history['train_loss'].append(train_loss)
             self.history['val_loss'].append(val_results['loss'])
@@ -333,41 +354,62 @@ class Trainer:
             self.history['val_precision'].append(val_results['precision'])
             self.history['train_recall'].append(train_rec)
             self.history['val_recall'].append(val_results['recall'])
-            
+
             # 打印详细指标
             self.print_detailed_metrics(val_results)
-            
+
             # 保存最佳模型
             if val_results['recall'] > best_score:
                 best_score = val_results['recall']
                 torch.save(self.model.state_dict(), 'best_model.pth')
                 print("Saved new best model!")
-            
+
+            # TensorBoard logging for each epoch
+            self.writer.add_scalar('Loss/train', train_loss, epoch) # Correct logging step to epoch number
+            self.writer.add_scalar('Accuracy/train', train_acc, epoch)
+            self.writer.add_scalar('Precision/train', train_prec, epoch)
+            self.writer.add_scalar('Recall/train', train_rec, epoch)
+
+            self.writer.add_scalar('Loss/val', val_results['loss'], epoch)
+            self.writer.add_scalar('Accuracy/val', val_results['accuracy'], epoch)
+            self.writer.add_scalar('Precision/val', val_results['precision'], epoch)
+            self.writer.add_scalar('Recall/val', val_results['recall'], epoch)
+
+            self._log_confusion_matrix(val_results['y_true'], val_results['y_pred'], epoch)
+            self._log_histograms(epoch)
+            self._log_pr_curves(val_results['y_true'], val_results['y_pred_probs'], epoch) # Use probabilities for PR curves
+
+
             # 每5个epoch可视化一次
             if (epoch+1) % 5 == 0:
                 self.plot_confusion_matrix(val_results)
                 self.plot_metrics()
 
+        self.writer.close() # Close writer after training
+
+
     def _log_confusion_matrix(self, y_true, y_pred, epoch):
         """将混淆矩阵记录到TensorBoard"""
         cm = multilabel_confusion_matrix(y_true, y_pred)
-        
+
         for class_idx in range(min(6, self.num_classes)):  # 最多显示6个类别
             fig = plt.figure(figsize=(6, 6))
-            sns.heatmap(cm[class_idx], annot=True, fmt='d', cmap='Blues')
+            sns.heatmap(cm[class_idx], annot=True, fmt='d', cmap='Blues',
+                        xticklabels=['Negative', 'Positive'],
+                        yticklabels=['Negative', 'Positive']) # Added labels to heatmap
             plt.title(f'Class {class_idx} Confusion Matrix')
             plt.xlabel('Predicted')
             plt.ylabel('True')
-            
+
             # 将matplotlib图像转为TensorBoard可识别的格式
             self.writer.add_figure(
-                f'Confusion Matrix/Class_{class_idx}', 
-                fig, 
+                f'Confusion Matrix/Class_{class_idx}',
+                fig,
                 global_step=epoch
             )
             plt.close(fig)
 
-    
+
     def _log_histograms(self, epoch):
         """记录权重和梯度直方图"""
         for name, param in self.model.named_parameters():
@@ -382,16 +424,16 @@ class Trainer:
             pred_probs = y_pred_probs[:, class_idx]
             self.writer.add_pr_curve(
                 f'PR Curve/Class_{class_idx}',
-                true_labels,
-                pred_probs,
+                labels=true_labels, # Corrected: Use 'labels' instead of positional argument
+                predictions=pred_probs, # Corrected: Use 'predictions' instead of positional argument
                 global_step=epoch
             )
 
 if __name__ == "__main__":
     # 初始化模型
-    num_classes = 8  
+    num_classes = 8
     model = TanNet(num_classes=num_classes)
-    
+
     # 创建带采样的DataLoader
     train_sampler = get_samplers(train_dataset)
     train_loader = DataLoader(
@@ -400,14 +442,14 @@ if __name__ == "__main__":
         sampler=train_sampler,
         pin_memory=True
     )
-    
+
     val_loader = DataLoader(
         val_dataset,
         batch_size=32,
         shuffle=False,
         pin_memory=True
     )
-    
+
     # 初始化训练器
     trainer = Trainer(
         model=model,
@@ -416,13 +458,12 @@ if __name__ == "__main__":
         num_classes=num_classes,
         device=device
     )
-    
+
     # 开始训练
     trainer.train(epochs=50)
-    
+
     # 可视化结果
     trainer.plot_metrics()
-    class_names = ["肺炎", "癌症", "正常", ...]  # 根据实际标签顺序
-    trainer.plot_confusion_matrix(threshold=0.6, class_names=class_names)
-    
-    
+    class_names = ["正常", "糖尿病", "青光眼", "白内障", "AMD", "高血压", "近视", "其他疾病/异常"]  # 根据实际标签顺序, add placeholder if you don't have names for all classes.
+    val_results = trainer._validate_epoch() # Need to run validation again to get results for plotting CM after training.
+    trainer.plot_confusion_matrix(val_results=val_results, class_names=class_names)
