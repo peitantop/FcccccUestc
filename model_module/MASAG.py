@@ -151,11 +151,11 @@ class MASAG(nn.Module):
 
 if __name__ == "__main__":
     # 创建一个简单的输入特征图
-    input1 = torch.randn(1, 1024, 64, 64)
-    input2 = torch.randn(1, 1024, 64, 64)
+    input1 = torch.randn(1, 64, 56, 56)
+    input2 = torch.randn(1, 64, 56, 56)
 
     # 创建一个MASAG实例
-    MASAG = MASAG(dim=1024)
+    MASAG = MASAG(dim=64)
 
     # 将两个输入特征图传递给 MSGA 模块
     output = MASAG(input1, input2)

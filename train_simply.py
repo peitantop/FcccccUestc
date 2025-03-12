@@ -20,8 +20,8 @@ sys.stdout.reconfigure(encoding='utf-8')
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-batch_size = 8
-num_epochs = 20
+batch_size = 6
+num_epochs = 40
 learning_rate = 1e-4
 weight_decay = 1e-4
 num_classes = 8
@@ -204,6 +204,16 @@ def train_val(model, criterion, optimizer, scheduler, num_epochs=40):
 
 if __name__ == "__main__":
     model = TOpNet()
+    # # pos_counts = train_dataset.labels.sum(axis=0)
+    # # neg_counts = len(train_dataset) - pos_counts
+    # # pos_weights = torch.tensor(neg_counts / pos_counts, dtype=torch.float).to(device)
+    # pos_counts = train_dataset.labels.sum(axis=0)  # [C]
+    # neg_counts = train_dataset.labels.shape[0] - pos_counts  # [C]
+    # total_counts = pos_counts + neg_counts
+    # beta = 0.999  # 控制平滑强度
+    # effective_num = 1.0 - np.power(beta, pos_counts)
+    # pos_weights = (1.0 - beta) / (effective_num + 1e-6)
+    # pos_weights = torch.FloatTensor(pos_weights).to(device)
     criterion = nn.BCEWithLogitsLoss()
     optimizer = AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=5, verbose=True, min_lr=1e-6)

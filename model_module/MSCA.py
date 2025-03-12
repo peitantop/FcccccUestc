@@ -125,9 +125,9 @@ class MSCAttention(nn.Module):
     # 输入 B C H W,  输出 B C H W
 if __name__ == '__main__':
     # 定义输入张量的形状为 B, C, H, W
-    input = torch.randn(1, 1024, 64, 64)
+    input = torch.randn(1,2048, 14, 14)
     # 创建一个 MSCA 模块实例
-    msca = MSCAttention(dim=1024)
+    msca = MSCAttention(dim=2048)
     # 执行前向传播
     output = msca(input)
     # 打印输入和输出的形状
