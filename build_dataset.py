@@ -18,7 +18,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 
 data_dir = 'D:/Fc25_07/FcccccUestc/Training_data'
 label_dir = 'D:/Fc25_07/FcccccUestc/total_data.csv'
-# Excel 文件路径
+
 generator = torch.Generator().manual_seed(42)
 
 # 将 DataFrame 保存为 CSV 文件

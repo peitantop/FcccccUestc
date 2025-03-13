@@ -390,9 +390,9 @@ class HRAMi(nn.Module):
 
 if __name__ == '__main__':
     # 创建DRAMiT模块的实例
-    DRAMiT = DRAMiT(dim=8)
+    DRAMiT = DRAMiT(dim=64)
     # 创建输入张量：B C H W
-    input = torch.randn(1, 3, 224, 224)
+    input = torch.randn(1, 64, 56, 56)
     # 执行DRAMiT模块的前向传播
     output = DRAMiT(input)
     # 输出输入和输出张量的形状
@@ -400,15 +400,15 @@ if __name__ == '__main__':
     print("DRAMiT_Output size:" ,output.size())
 
 
-    HRAMi = HRAMi(dim=64)
-    input = [
-                torch.randn(1, 64, 64, 64),  # stage1  C H W
-                torch.randn(1, 64, 32, 32),  # stage2  C H/2 W/2
-                torch.randn(1, 64, 16, 16),  # stage3  C H/4 W/4
-                torch.randn(1, 64, 64, 64)   # stage4  C H W
-            ]
-    # 执行HRAMi模块的前向传播
-    output = HRAMi(input)   #output的尺度和stage4特征图尺度相同  C H W
-    print('HRAMi_input size:', input[3].size())
-    print('HRAMi_output size:', output.size())
+    # HRAMi = HRAMi(dim=64)
+    # input = [
+    #             torch.randn(1, 64, 64, 64),  # stage1  C H W
+    #             torch.randn(1, 64, 32, 32),  # stage2  C H/2 W/2
+    #             torch.randn(1, 64, 16, 16),  # stage3  C H/4 W/4
+    #             torch.randn(1, 64, 64, 64)   # stage4  C H W
+    #         ]
+    # # 执行HRAMi模块的前向传播
+    # output = HRAMi(input)   #output的尺度和stage4特征图尺度相同  C H W
+    # print('HRAMi_input size:', input[3].size())
+    # print('HRAMi_output size:', output.size())
 

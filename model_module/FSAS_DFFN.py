@@ -310,7 +310,7 @@ class FFTformer(nn.Module):
 
         return out_dec_level1
 if __name__ == '__main__':
-    input = torch.randn(1, 64,256, 256)
+    input = torch.randn(1, 64,56, 56)
     # model = FFTformer(3,3)
     model = FSASDFFN(64)
     output = model(input)

@@ -196,20 +196,20 @@ class MSPABlock(nn.Module):
 # 输入 B C H W,  输出 B C H W
 if __name__ == '__main__':
     # 定义输入张量的形状为 B, C, H, W
-    input = torch.randn(1, 1024, 64, 64)
+    input = torch.randn(1, 1024, 14, 14)
     # 1.创建一个 MSPABlock 模块实例
-    # MSPABlock= MSPABlock(inplanes=64)
-    # # 执行前向传播
-    # output = MSPABlock(input)
-    # # 打印输入和输出的形状
-    # print('MSPABlock_input_size:',input.size())
+    MSPABlock= MSPABlock(inplanes=1024)
+    # 执行前向传播
+    output = MSPABlock(input)
+    # 打印输入和输出的形状
+    print('MSPABlock_input_size:',input.size())
     # print('MSPABlock_output_size:',output.size())
 
     # 2.创建一个 MSPA 模块实例
 
-    MSPA = MSPAModule(inplanes=256,scale=4)
-    # 执行前向传播
-    output = MSPA(input)
-    # 打印输入和输出的形状
-    print('MSPA_input_size:', input.size())
-    print('MSPA_output_size:', output.size())
+    # MSPA = MSPAModule(inplanes=256,scale=4)
+    # # 执行前向传播
+    # output = MSPA(input)
+    # # 打印输入和输出的形状
+    # print('MSPA_input_size:', input.size())
+    # print('MSPA_output_size:', output.size())

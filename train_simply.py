@@ -21,8 +21,8 @@ os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 batch_size = 6
-num_epochs = 40
-learning_rate = 1e-4
+num_epochs = 100
+learning_rate = 5e-5
 weight_decay = 1e-4
 num_classes = 8
 data_dir = 'D:/Fc25_07/FcccccUestc/Training_data'
