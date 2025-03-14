@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 import copy
 import json
+from torch.utils.tensorboard import SummaryWriter
 from datetime import datetime
 
 sys.stdin.reconfigure(encoding='utf-8')
@@ -164,6 +165,12 @@ def plot_metrics(train_metrics, val_metrics, save_path):
 
 def train_val(model, criterion, optimizer, scheduler, num_epochs=40):
     model.to(device)
+    
+    current_time = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_dir = os.path.join(save_dir, 'runs', current_time)
+    writer = SummaryWriter(log_dir)
+    print(f"TensorBoard 日志保存在: {log_dir}")
+
     best_acc = 0.0
     best_model_wts = copy.deepcopy(model.state_dict())
     train_metrics = {'loss': [], 'precision': [], 'recall': [], 'accuracy': []}
