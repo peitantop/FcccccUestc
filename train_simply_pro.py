@@ -5,7 +5,7 @@ import os
 import numpy as np
 import sys
 import torch.nn as nn
-from model_newnew import TOpNet, CTranModel
+from model_new01 import TOpNet
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from sklearn.metrics import precision_score, recall_score, accuracy_score, average_precision_score
@@ -15,22 +15,21 @@ import copy
 import json
 from torch.utils.tensorboard import SummaryWriter
 from datetime import datetime
-from torchvision import models
 
 sys.stdin.reconfigure(encoding='utf-8')
 sys.stdout.reconfigure(encoding='utf-8')
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-batch_size = 16
-num_epochs = 100
+batch_size = 4
+num_epochs = 150
 learning_rate = 1e-5
 weight_decay = 1e-4
 num_classes = 8
 data_dir = 'D:/Fc25_07/FcccccUestc/Training_data'
 label_dir = 'D:/Fc25_07/FcccccUestc/total_data.csv'
 save_dir = 'D:/Fc25_07/FcccccUestc/results'
-threshold = 0.5
+threshold = 0.3
 
 os.makedirs(save_dir, exist_ok=True)
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -166,20 +165,19 @@ def plot_metrics(train_metrics, val_metrics, save_path):
 
 def train_val(model, criterion, optimizer, scheduler, num_epochs=40):
     model.to(device)
-    
+
     current_time = datetime.now().strftime('%Y%m%d_%H%M%S')
     log_dir = os.path.join(save_dir, 'runs', current_time)
     writer = SummaryWriter(log_dir)
     print(f"TensorBoard 日志保存在: {log_dir}")
 
+    writer = SummaryWriter(os.path.join(save_dir, 'runs'))
     best_score = 0.0
     best_model_wts = copy.deepcopy(model.state_dict())
     train_metrics = {'loss': [], 'precision': [], 'recall': [], 'accuracy': []}
     val_metrics = {'loss': [], 'precision': [], 'recall': [], 'accuracy': []}
-    
-    patience = 6  # 容忍的轮数
-    counter = 0    # 计数器
 
+    
     for epoch in range(num_epochs):
         print(f"Epoch {epoch+1}/{num_epochs}")
         
@@ -190,6 +188,17 @@ def train_val(model, criterion, optimizer, scheduler, num_epochs=40):
             model, val_loader, criterion, device
         )
         
+        # 记录指标到 tensorboard
+        writer.add_scalar('Loss/train', train_loss, epoch)
+        writer.add_scalar('Loss/val', val_loss, epoch)
+        writer.add_scalar('Precision/train', train_precision, epoch)
+        writer.add_scalar('Precision/val', val_precision, epoch)
+        writer.add_scalar('Recall/train', train_recall, epoch)
+        writer.add_scalar('Recall/val', val_recall, epoch)
+        writer.add_scalar('Accuracy/train', train_accuracy, epoch)
+        writer.add_scalar('Accuracy/val', val_accuracy, epoch)
+        
+        # 更新指标历史记录
         train_metrics['loss'].append(train_loss)
         train_metrics['precision'].append(train_precision)
         train_metrics['recall'].append(train_recall)
@@ -205,28 +214,47 @@ def train_val(model, criterion, optimizer, scheduler, num_epochs=40):
         else:
             scheduler.step()
         
+        # 计算综合得分
         current_score = (val_precision + val_recall + val_accuracy) / 3
         
+        # 每5个epoch保存一次模型
+        if (epoch + 1) % 5 == 0:
+            checkpoint_path = os.path.join(save_dir, f'model_epoch_{epoch+1}.pth')
+            torch.save(model.state_dict(), checkpoint_path)
+        
+        # 更新最佳模型
         if current_score > best_score:
             best_score = current_score
             best_model_wts = copy.deepcopy(model.state_dict())
-            counter = 0  # 重置计数器
-        else:
-            counter += 1  # 增加计数器
-            
-        # 早停检查
-        if counter >= patience:
-            print(f'Early stopping triggered after epoch {epoch+1}')
-            break
-
+            # 保存最佳验证指标
+            best_val_metrics = {
+                'epoch': epoch + 1,
+                'loss': val_loss,
+                'precision': val_precision,
+                'recall': val_recall,
+                'accuracy': val_accuracy,
+                'combined_score': current_score
+            }
+            with open(os.path.join(save_dir, 'valid_metrics.json'), 'w') as f:
+                json.dump(best_val_metrics, f, indent=4)
+    
+    writer.close()
     model.load_state_dict(best_model_wts)
     plot_metrics(train_metrics, val_metrics, os.path.join(save_dir, 'training_metrics.png'))
     return model, train_metrics, val_metrics
-
 if __name__ == "__main__":
-    # model = TOpNet()
-    backbone = models.densenet161(weights=models.DenseNet161_Weights).features
-    model = CTranModel(num_labels=8, use_lmt=None,device=device, backbone_model=backbone).to(device)
+    model = TOpNet()
+    model.load_state_dict(torch.load("D:/Fc25_07/FcccccUestc/results/model_weights.pth", weights_only=True))
+    # # pos_counts = train_dataset.labels.sum(axis=0)
+    # # neg_counts = len(train_dataset) - pos_counts
+    # # pos_weights = torch.tensor(neg_counts / pos_counts, dtype=torch.float).to(device)
+    # pos_counts = train_dataset.labels.sum(axis=0)  # [C]
+    # neg_counts = train_dataset.labels.shape[0] - pos_counts  # [C]
+    # total_counts = pos_counts + neg_counts
+    # beta = 0.999  # 控制平滑强度
+    # effective_num = 1.0 - np.power(beta, pos_counts)
+    # pos_weights = (1.0 - beta) / (effective_num + 1e-6)
+    # pos_weights = torch.FloatTensor(pos_weights).to(device)
     criterion = nn.BCEWithLogitsLoss()
     optimizer = AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     scheduler = ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=5, verbose=True, min_lr=1e-6)

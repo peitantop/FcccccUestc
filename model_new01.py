@@ -1,7 +1,7 @@
 import torch
 from torchvision import models
 import torch.nn as nn
-from model_module import PSConv, FSAS_DFFN, MSCA, HRAMi_DRAMiT, MASAG, DTAB_GCSA, LCA, SSA, EAGFM, BIE_BIEF, SHViTBlock, PCAA, MSPA, MAB
+from model_module import PSConv, FSAS_DFFN, MSCA, HRAMi_DRAMiT, MASAG, DTAB_GCSA, LCA, SSA, EAGFM, BIE_BIEF, SHViTBlock, PCAA
 
 # 风车卷积
 PSConv1 = PSConv.PSConv(1024, 2048)
@@ -25,7 +25,7 @@ BIEF_block = BIE_BIEF.BIEF(1024)
 SHViT_Block = SHViTBlock.SHViTBlock(1024,type='s')
 MSCA = MSCA.MSCAttention(1024)
 model_base = models.resnet152(weights=models.ResNet152_Weights)
-model_base_2 = models.efficientnet_v2_s(weights=models.EfficientNet_V2_S_Weights)
+model_base_2 = models.densenet161(weights=models.DenseNet161_Weights)
 
 
 def count_parameters(model):
@@ -35,7 +35,7 @@ class AlternativeNet(nn.Module):
     def __init__(self):
         super(AlternativeNet, self).__init__()
         self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
-        self.conv = nn.Conv2d(1280, 1024, kernel_size=1, bias=False)
+        self.conv = nn.Conv2d(2208, 1024, kernel_size=1, bias=False)
     def forward(self, x):
         x = self.upsample(x)
         return self.conv(x)
@@ -101,7 +101,7 @@ class TOpNet(nn.Module):
 if __name__ == "__main__":
     device = "cuda:0"
     model = TOpNet().to(device)
-    inputs = torch.rand(1, 3, 224, 224).to(device)
+    inputs = torch.rand(1, 3, 384, 384).to(device)
     out = model(inputs)
     print(out)
     print(out.size())
