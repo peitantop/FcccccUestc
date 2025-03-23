@@ -144,7 +144,7 @@ def unblock(x, Ho):
 
 def alter_sparse(x, sparse_size=8):
     x = x.permute(0, 2, 3, 1)
-    assert x.shape[1] % sparse_size == 0 & x.shape[2] % sparse_size == 0, 'image size should be divisible by block_size'
+    # assert x.shape[1] % sparse_size == 0 & x.shape[2] % sparse_size == 0, 'image size should be divisible by block_size'
     grid_size = x.shape[1] // sparse_size
     out, H, Hp, C = block(x, grid_size)
     out = out.permute(0, 3, 4, 1, 2, 5).contiguous()

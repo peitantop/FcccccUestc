@@ -24,9 +24,13 @@ EAGFM_block = EAGFM.EAGFM(1024)
 BIEF_block = BIE_BIEF.BIEF(1024)
 SHViT_Block = SHViTBlock.SHViTBlock(1024,type='s')
 MSCA = MSCA.MSCAttention(1024)
-model_base = models.resnet152(weights=models.ResNet152_Weights)
-model_base_2 = models.densenet161(weights=models.DenseNet161_Weights)
+model_base = models.resnet101(weights=models.ResNet101_Weights)
+model_base_2 = models.densenet169(weights=models.DenseNet169_Weights)
 
+
+vit = models.vit_b_16(weights=models.ViT_B_16_Weights)
+# vit = models.swin_b()
+vit.heads.head = nn.Linear(vit.heads.head.in_features, 8)
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters())
@@ -35,7 +39,7 @@ class AlternativeNet(nn.Module):
     def __init__(self):
         super(AlternativeNet, self).__init__()
         self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
-        self.conv = nn.Conv2d(2208, 1024, kernel_size=1, bias=False)
+        self.conv = nn.Conv2d(1664, 1024, kernel_size=1, bias=False)
     def forward(self, x):
         x = self.upsample(x)
         return self.conv(x)
@@ -81,8 +85,11 @@ class TOpNet(nn.Module):
             nn.Linear(256, 8),
             nn.Dropout(0.5),
         )
+        # self.vit = vit
+        self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
+        # x5 = self.vit(x)
         x4 = self.eff(x)     # efficientnet
         x = self.prex(x)     # resnet -->[1, 64, 56, 56]
         x = self.IEL(x)      # imagestr
@@ -95,13 +102,14 @@ class TOpNet(nn.Module):
         x = self.EAGFM(x3, x4)# eff + res
         x = self.SHViT_Block(x)# featcombine
         x = self.strength_block(x) # res
+        # return self.sigmoid(x) * x5 + self.sigmoid(x5) * x
         return x
 
 
 if __name__ == "__main__":
     device = "cuda:0"
     model = TOpNet().to(device)
-    inputs = torch.rand(1, 3, 384, 384).to(device)
+    inputs = torch.rand(1, 3, 224, 224).to(device)
     out = model(inputs)
     print(out)
     print(out.size())

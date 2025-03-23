@@ -168,16 +168,16 @@ class EAGFM(nn.Module):
 
 # 输入 N C H W,  输出 N C H W
 if __name__ == '__main__':
-    input1 = torch.randn(1, 32, 64, 64)
-    input2 = torch.randn(1, 32, 64, 64)
-    # 初始化CVIM模块并设定通道维度
-    CVIM_module = CVIM(32)
-    output = CVIM_module(input1, input2)
-    # 输出结果的形状
-    print("CVIM_输入张量的形状：", input1.shape)
-    print("CVIM_输出张量的形状：", output.shape)
+    input1 = torch.randn(1, 2048, 7, 7)
+    input2 = torch.randn(1, 2048, 7, 7)
+    # # 初始化CVIM模块并设定通道维度
+    # CVIM_module = CVIM(32)
+    # output = CVIM_module(input1, input2)
+    # # 输出结果的形状
+    # print("CVIM_输入张量的形状：", input1.shape)
+    # print("CVIM_输出张量的形状：", output.shape)
     # 初始化EAGFM模块并设定通道维度
-    EGAFM_module = EAGFM(32)
+    EGAFM_module = EAGFM(2048)
     output = EGAFM_module(input1, input2)
     # 输出结果的形状
     print("二次创新EAGFM_输入张量的形状：", input1.shape)

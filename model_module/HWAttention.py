@@ -161,8 +161,8 @@ class HWAttention(nn.Module):
 # 输入 N C H W,  输出 N C H W
 if __name__ == '__main__':
     # 实例化HWAttention模型  高效的特征提取模块
-    model = HWAttention(n_feat=64, o_feat=64) #输入通道数n_feat=32, 输出通道数o_feat=32
-    input = torch.randn(1, 64, 56, 56)
+    model = HWAttention(n_feat=3, o_feat=3) #输入通道数n_feat=32, 输出通道数o_feat=32
+    input = torch.randn(1, 3, 224, 224)
     # 执行前向传播
     output = model(input)
     # 打印输出张量的形状

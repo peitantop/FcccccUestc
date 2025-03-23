@@ -10,6 +10,7 @@ import matplotlib
 import numpy as np 
 import sys
 import re
+import cv2
 sys.stdin.reconfigure(encoding='utf-8')
 sys.stdout.reconfigure(encoding='utf-8')
 
@@ -47,13 +48,50 @@ class EyeDataset(Dataset):
     def __len__(self):
         return len(self.patient_ids) if self.is_test else len(self.df)
 
-    def _crop_circle(self, img):
-        """将正方形图片裁剪为圆形"""
-        mask = Image.new('L', (self.crop_size, self.crop_size), 0)
+    def _find_circle_crop_params(self, img):
+        """找到最佳的圆形裁剪参数"""
+        # 转换为灰度图
+        gray = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
+        
+        # 使用Otsu's二值化
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        
+        # 找到非零区域的边界
+        coords = cv2.findNonZero(binary)
+        x, y, w, h = cv2.boundingRect(coords)
+        
+        # 计算圆心和半径
+        center_x = x + w // 2
+        center_y = y + h // 2
+        radius = min(w, h) // 2
+        
+        return center_x, center_y, radius
+
+    def _smart_crop_circle(self, img):
+        """智能圆形裁剪"""
+        # 找到最佳裁剪参数
+        center_x, center_y, radius = self._find_circle_crop_params(img)
+        
+        # 创建圆形掩码
+        mask = Image.new('L', img.size, 0)
         draw = ImageDraw.Draw(mask)
-        draw.ellipse((0, 0, self.crop_size, self.crop_size), fill=255)
-        result = Image.new('RGB', (self.crop_size, self.crop_size), (0, 0, 0))
-        result.paste(img, (0, 0), mask=mask)
+        
+        # 绘制圆形
+        bbox = [
+            center_x - radius,
+            center_y - radius,
+            center_x + radius,
+            center_y + radius
+        ]
+        draw.ellipse(bbox, fill=255)
+        
+        # 应用掩码并裁剪
+        result = Image.new('RGB', (radius * 2, radius * 2), (0, 0, 0))
+        cropped = img.crop(bbox)
+        result.paste(cropped, (0, 0), mask.crop(bbox))
+        
+        # 调整到目标大小
+        result = result.resize((self.crop_size, self.crop_size))
         return result
 
     def __getitem__(self, idx):
@@ -77,8 +115,8 @@ class EyeDataset(Dataset):
             right_image = right_image.resize((self.crop_size, self.crop_size))
             
             # 圆形裁剪
-            left_image = self._crop_circle(left_image)
-            right_image = self._crop_circle(right_image)
+            left_image = self._smart_crop_circle(left_image)
+            right_image = self._smart_crop_circle(right_image)
             
             # 对右眼图像进行左右翻转
             right_image = right_image.transpose(Image.FLIP_LEFT_RIGHT)
@@ -108,7 +146,7 @@ class EyeDataset(Dataset):
             image = image.resize((self.crop_size, self.crop_size))
             
             # 圆形裁剪
-            image = self._crop_circle(image)
+            image = self._smart_crop_circle(image)
             
             # 对右眼图像进行左右翻转
             if not is_left_eye:
@@ -159,8 +197,28 @@ def split_dataset_by_patient(df, train_ratio=0.8, val_ratio=0.1, test_ratio=0.1,
 
 
 # 图像变换
+class CLAHETransform:
+    def __init__(self, clip_limit=2.0, tile_grid_size=(8,8)):
+        self.clip_limit = clip_limit
+        self.tile_grid_size = tile_grid_size
+        
+    def __call__(self, img):
+        # 将PIL图像转换为OpenCV格式
+        img = np.array(img)
+        img = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
+        
+        # 对L通道进行CLAHE
+        clahe = cv2.createCLAHE(clipLimit=self.clip_limit, tileGridSize=self.tile_grid_size)
+        img[:,:,0] = clahe.apply(img[:,:,0])
+        
+        # 转换回RGB
+        img = cv2.cvtColor(img, cv2.COLOR_LAB2RGB)
+        return Image.fromarray(img)
+
+# 修改训练数据增强
 train_transforms = transforms.Compose([
     transforms.Resize(224),
+    CLAHETransform(clip_limit=2.0, tile_grid_size=(8,8)),  # 添加CLAHE
     transforms.RandomHorizontalFlip(p=0.5),
     transforms.RandomVerticalFlip(p=0.5),
     transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2),

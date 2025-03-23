@@ -35,7 +35,7 @@ df = pd.read_csv(label_dir, header=0, encoding='utf-8')
 
 
 class EyeDataset(Dataset):
-    def __init__(self, data_dir, label_dir, transform=None, crop_size=384, is_test=False):
+    def __init__(self, data_dir, label_dir, transform=None, crop_size=224, is_test=False):
         self.data_dir = data_dir
         self.transform = transform
         self.crop_size = crop_size
